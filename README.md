@@ -16,7 +16,7 @@ needs an api key for gemini, openai, or anthropic — pick one in the app and pa
 
 ```bash
 pip install -r requirements.txt
-python server.py
+python3 server.py
 ```
 
 then open `http://localhost:8000` in your browser.
