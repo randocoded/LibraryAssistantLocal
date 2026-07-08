@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="AI-Powered book recommendations verified with your local library's availability.">
+
+    <title>Library Assistant - AI Book Recommendations & Catalog Checker</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet"> <!-- inter + outfit fonts -->
+
+    <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/fontawesome.min.css"> <!-- fontawesome base -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/solid.min.css"> <!-- solid icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/regular.min.css"> <!-- regular icons -->
+
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="blob blob-1"></div> <!-- bg blobs for that glowy look -->
+    <div class="blob blob-2"></div>
+    <div class="blob blob-3"></div>
+
+    <div class="app-container">
+        <header>
+            <div class="logo">
+                <i class="fa-solid fa-book-open-reader logo-icon"></i>
+                <h1>Library <span>Assistant</span></h1>
+            </div>
+            <p class="subtitle">AI-powered book recommendations matched with your local library catalog</p>
+        </header>
+
+        <main>
+            <section class="search-section card"> <!-- main search form -->
+                <form id="recommendationForm">
+                    <div class="form-group"> <!-- book input -->
+                        <label for="bookInput"><i class="fa-solid fa-magnifying-glass form-icon"></i> A Book You Liked</label>
+                        <input type="text" id="bookInput" placeholder="e.g., Project Hail Mary or Atomic Habits..." required autocomplete="off">
+                    </div>
+
+                    <div class="form-row"> <!-- library picker + optional custom domain -->
+                        <div class="form-group col">
+                            <label for="librarySelect"><i class="fa-solid fa-landmark form-icon"></i> Target Library</label>
+                            <select id="librarySelect">
+                                <option value="opl.bibliocommons.com" selected>Oakville Public Library</option> <!-- presets start -->
+                                <option value="mississauga.bibliocommons.com">Mississauga Public Library</option>
+                                <option value="tpl.bibliocommons.com">Toronto Public Library</option>
+                                <option value="ottawa.bibliocommons.com">Ottawa Public Library</option>
+                                <option value="vpl.bibliocommons.com">Vancouver Public Library</option>
+                                <option value="calgary.bibliocommons.com">Calgary Public Library</option>
+                                <option value="sfpl.bibliocommons.com">San Francisco Public Library</option>
+                                <option value="spl.bibliocommons.com">Seattle Public Library</option>
+                                <option value="chipublib.bibliocommons.com">Chicago Public Library</option>
+                                <option value="bpl.bibliocommons.com">Boston Public Library</option>
+                                <option value="custom">Custom BiblioCommons Subdomain...</option>
+                            </select>
+                        </div>
+
+                        <div id="customSubdomainGroup" class="form-group col hidden"> <!-- only shows up when "custom" is picked -->
+                            <label for="customSubdomainInput"><i class="fa-solid fa-globe form-icon"></i> Custom Catalog Subdomain</label>
+                            <input type="text" id="customSubdomainInput" placeholder="e.g., nypl.bibliocommons.com">
+                        </div>
+                    </div>
+
+                    <div class="form-row"> <!-- provider + api key + test btn -->
+                        <div class="form-group col col-narrow">
+                            <label for="apiProviderSelect"><i class="fa-solid fa-robot form-icon"></i> AI Provider</label>
+                            <select id="apiProviderSelect">
+                                <option value="gemini" selected>Gemini</option>
+                                <option value="openai">OpenAI</option>
+                                <option value="anthropic">Anthropic</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group col">
+                            <label for="apiKeyInput"><i class="fa-solid fa-key form-icon"></i> API Key </label>
+                            <div class="key-input-row">
+                                <input type="password" id="apiKeyInput" placeholder="Enter API key..." required autocomplete="new-password">
+                                <button type="button" id="testKeyBtn" class="btn-test-key">
+                                    <i class="fa-solid fa-plug-circle-check"></i> Test
+                                </button>
+                            </div>
+                            <div id="testKeyResult" class="test-key-result hidden"></div>
+                        </div>
+                    </div>
+
+                    <div class="form-group"> <!-- preferred formats -->
+                        <label><i class="fa-solid fa-filter form-icon"></i> Preferred Formats</label>
+                        <div class="checkbox-group">
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="formats" value="Book">
+                                <span class="custom-checkbox"><i class="fa-solid fa-book"></i> Physical Book</span>
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="formats" value="eBook">
+                                <span class="custom-checkbox"><i class="fa-solid fa-tablet-screen-button"></i> eBook</span>
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="formats" value="Downloadable Audiobook">
+                                <span class="custom-checkbox"><i class="fa-solid fa-headphones"></i> Audiobook</span>
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="formats" value="DVD">
+                                <span class="custom-checkbox"><i class="fa-solid fa-compact-disc"></i> DVD / Video</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <button type="submit" id="searchBtn"> <!-- submit -->
+                        <span>Get Recommendations</span>
+                        <i class="fa-solid fa-wand-magic-sparkles btn-icon"></i>
+                    </button>
+                </form>
+            </section>
+
+            <section id="loadingState" class="loading-container card hidden"> <!-- loading overlay, hidden by default -->
+                <div class="spinner-wrapper">
+                    <div class="spinner"></div>
+                    <i class="fa-solid fa-brain brain-pulse"></i>
+                </div>
+                <h3 id="loadingTitle">Consulting AI Assistant</h3>
+                <p id="loadingMsg">Analyzing themes and generating recommendations...</p>
+
+                <div class="progress-bar-container"> <!-- progress bar -->
+                    <div id="progressBar" class="progress-bar"></div>
+                </div>
+
+                <div class="loading-steps"> <!-- stepper -->
+                    <div class="step active" id="step-ai">
+                        <i class="fa-regular fa-circle-check"></i>
+                        <span>AI recommendations</span>
+                    </div>
+                    <div class="step" id="step-covers">
+                        <i class="fa-regular fa-circle-dot"></i>
+                        <span>Fetch covers</span>
+                    </div>
+                    <div class="step" id="step-catalog">
+                        <i class="fa-regular fa-circle-dot"></i>
+                        <span>Check library catalog</span>
+                    </div>
+                </div>
+            </section>
+
+            <section id="clarificationSection" class="clarification-container card hidden"> <!-- clarification menu, hidden until needed -->
+                <div class="clarification-header">
+                    <div class="clarification-icon-wrapper">
+                        <i class="fa-solid fa-circle-question clarification-icon"></i>
+                    </div>
+                    <h3>Did you mean…?</h3>
+                    <p id="clarificationMsg">The AI found a few books that could match. Please select the one you meant:</p>
+                </div>
+
+                <div id="clarificationOptions" class="clarification-options"></div> <!-- cards get injected by js -->
+
+                <div class="clarification-other"> <!-- manual override -->
+                    <label for="clarificationOther"><i class="fa-solid fa-pen-to-square form-icon"></i> Or type the exact title yourself</label>
+                    <div class="clarification-other-row">
+                        <input type="text" id="clarificationOther" placeholder="Enter the exact book title...">
+                        <button type="button" id="clarificationOtherBtn">
+                            <i class="fa-solid fa-arrow-right"></i>
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <section id="resultsSection" class="results-container hidden"> <!-- results, hidden until we have data -->
+                <div class="results-header">
+                    <h2>Smart Recommendations</h2>
+                    <p id="resultsCount">Found matches for you</p>
+                </div>
+
+                <div id="resultsGrid" class="results-grid"></div> <!-- cards get injected by js -->
+            </section>
+        </main>
+    </div>
+
+    <script src="app.js"></script> <!-- app logic -->
+</body>
+</html>
