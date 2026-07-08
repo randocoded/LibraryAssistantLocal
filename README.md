@@ -32,3 +32,5 @@ then open `http://localhost:8000` in your browser.
 
 - catalog scraping is html-based (bibliocommons has no clean public api), so it's a bit fragile if they change their markup
 - your api key gets saved in localStorage per-provider, so switching providers keeps each key around
+- every api endpoint validates its inputs (book title length, allowed formats, allowed providers, domain must be `*.bibliocommons.com`, request size capped at 50kb) and always returns clean json errors instead of crashing — a broken/oversized/malicious request can't take the server down
+- if the ai returns malformed json or garbage recommendation items, those get filtered out and you still get a sane fallback response instead of a 500
