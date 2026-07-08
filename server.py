@@ -8,8 +8,70 @@ import requests
 from bs4 import BeautifulSoup
 
 PORT = 8000
+MAX_BODY_BYTES = 50_000  # cap request size so someone can't send a 500mb blob and choke the server
+
+VALID_PROVIDERS = {'gemini', 'openai', 'anthropic'}
+VALID_FORMATS = {'Book', 'eBook', 'Downloadable Audiobook', 'DVD'}
+DOMAIN_PATTERN = re.compile(r'^[a-z0-9-]+\.bibliocommons\.com$')  # only allow legit bibliocommons subdomains
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static')  # static/ folder lives next to this file
+
+
+def read_json_body(handler):
+    """reads + parses the request body, w/ a size cap. returns (data, error_msg) — one will be None."""
+    try:
+        length = int(handler.headers.get('Content-Length', 0))
+    except (TypeError, ValueError):
+        return None, "Missing or invalid Content-Length header"
+
+    if length <= 0:
+        return None, "Empty request body"
+    if length > MAX_BODY_BYTES:
+        return None, "Request body too large"
+
+    raw = handler.rfile.read(length)
+    try:
+        data = json.loads(raw.decode('utf-8'))
+    except Exception:
+        return None, "Invalid JSON payload"
+
+    if not isinstance(data, dict):
+        return None, "Request body must be a JSON object"
+
+    return data, None
+
+
+def clean_str(value, max_len=300):
+    """coerce to a trimmed string, capped in length. non-strings become empty."""
+    if not isinstance(value, str):
+        return ""
+    return value.strip()[:max_len]
+
+
+def validate_provider(provider):
+    provider = clean_str(provider, 20).lower()
+    if provider not in VALID_PROVIDERS:
+        return None, f"api_provider must be one of: {', '.join(sorted(VALID_PROVIDERS))}"
+    return provider, None
+
+
+def validate_domain(domain):
+    domain = clean_str(domain, 100).lower()
+    if not domain or not DOMAIN_PATTERN.match(domain):
+        return None, "library_domain must look like 'yourlib.bibliocommons.com'"
+    return domain, None
+
+
+def validate_formats(formats):
+    if not isinstance(formats, list) or len(formats) == 0:
+        return None, "formats must be a non-empty list"
+
+    cleaned = [clean_str(f, 40) for f in formats]
+    valid = [f for f in cleaned if f in VALID_FORMATS]
+
+    if not valid:  # none of what they sent matched anything we recognize
+        return None, f"formats must include at least one of: {', '.join(sorted(VALID_FORMATS))}"
+    return valid, None
 
 
 class LibraryAssistantHandler(http.server.BaseHTTPRequestHandler):
@@ -50,97 +112,113 @@ class LibraryAssistantHandler(http.server.BaseHTTPRequestHandler):
             self.send_error(500, f"Internal Server Error: {str(e)}")  # if disk read fails etc
 
     def do_POST(self):
-        if self.path == '/api/test-key':  # tiny endpoint to validate a provider key w/ minimal token usage
-            content_length = int(self.headers.get('Content-Length', 0))
-            post_data = self.rfile.read(content_length)
-
+        try:  # outer safety net: no matter what goes wrong, we always send a real json response back
+            if self.path == '/api/test-key':
+                self._handle_test_key()
+            elif self.path == '/api/clarify':
+                self._handle_clarify()
+            elif self.path == '/api/recommend':
+                self._handle_recommend()
+            else:
+                self.send_error(404, "Endpoint Not Found")
+        except Exception as e:
+            import traceback
+            traceback.print_exc()  # dump stack trace to server logs for debugging
             try:
-                params = json.loads(post_data.decode('utf-8'))  # parse json body
+                self.send_json_response(500, {"error": f"Unexpected server error: {str(e)}"})
             except Exception:
-                self.send_json_response(400, {"error": "Invalid JSON payload"})
-                return
+                pass  # connection's probably already dead at this point, nothing more we can do
 
-            provider = params.get('api_provider', 'gemini')
-            api_key = params.get('api_key')
+    def _handle_test_key(self):
+        # tiny endpoint to validate a provider key w/ minimal token usage
+        params, err = read_json_body(self)
+        if err:
+            self.send_json_response(400, {"ok": False, "error": err})
+            return
 
-            if not api_key:  # no key = can't test it
-                self.send_json_response(400, {"ok": False, "error": "No API key provided"})
-                return
+        provider, err = validate_provider(params.get('api_provider', 'gemini'))
+        if err:
+            self.send_json_response(400, {"ok": False, "error": err})
+            return
 
-            result = self.test_provider_key(provider, api_key)
-            self.send_json_response(200, result)
+        api_key = clean_str(params.get('api_key'), 500)
+        if not api_key:  # no key = can't test it
+            self.send_json_response(400, {"ok": False, "error": "No API key provided"})
+            return
 
-        elif self.path == '/api/clarify':  # endpoint: check if user input is ambiguous (multiple books match)
-            content_length = int(self.headers.get('Content-Length', 0))
-            post_data = self.rfile.read(content_length)
+        result = self.test_provider_key(provider, api_key)
+        self.send_json_response(200, result)
 
-            try:
-                params = json.loads(post_data.decode('utf-8'))
-            except Exception:
-                self.send_json_response(400, {"error": "Invalid JSON payload"})
-                return
+    def _handle_clarify(self):
+        # endpoint: check if user input is ambiguous (multiple books match)
+        params, err = read_json_body(self)
+        if err:
+            self.send_json_response(400, {"error": err})
+            return
 
-            book_input = params.get('book_input')
-            provider = params.get('api_provider', 'gemini')
+        book_input = clean_str(params.get('book_input'), 300)
+        if not book_input:
+            self.send_json_response(400, {"error": "book_input is required"})
+            return
 
-            api_key = params.get('api_key') or os.environ.get(f'{provider.upper()}_API_KEY')  # allow key from request OR env var like GEMINI_API_KEY / OPENAI_API_KEY / etc
+        provider, err = validate_provider(params.get('api_provider', 'gemini'))
+        if err:
+            self.send_json_response(400, {"error": err})
+            return
 
-            if not book_input:
-                self.send_json_response(400, {"error": "book_input is required"})
-                return
+        api_key = clean_str(params.get('api_key'), 500) or os.environ.get(f'{provider.upper()}_API_KEY')  # allow key from request OR env var like GEMINI_API_KEY / OPENAI_API_KEY / etc
 
-            try:
-                clarification = self.get_ai_clarification(book_input, api_key, provider)
-                self.send_json_response(200, clarification)
-            except Exception as e:
-                import traceback
-                traceback.print_exc()  # dump stack trace to server logs for debugging
-                self.send_json_response(500, {"error": str(e)})
+        clarification = self.get_ai_clarification(book_input, api_key, provider)
+        self.send_json_response(200, clarification)
 
-        elif self.path == '/api/recommend':  # endpoint: main flow -> ai recs + covers + catalog scrape
-            content_length = int(self.headers.get('Content-Length', 0))
-            post_data = self.rfile.read(content_length)
+    def _handle_recommend(self):
+        # endpoint: main flow -> ai recs + covers + catalog scrape
+        params, err = read_json_body(self)
+        if err:
+            self.send_json_response(400, {"error": err})
+            return
 
-            try:
-                params = json.loads(post_data.decode('utf-8'))
-            except Exception:
-                self.send_json_response(400, {"error": "Invalid JSON payload"})
-                return
+        book_title = clean_str(params.get('book_title'), 300)
+        if not book_title:
+            self.send_json_response(400, {"error": "Book title is required"})
+            return
 
-            book_title = params.get('book_title')
-            library_domain = params.get('library_domain', 'opl.bibliocommons.com')
-            preferred_formats = params.get('formats', ['Book', 'eBook', 'Downloadable Audiobook'])
-            provider = params.get('api_provider', 'gemini')
-            api_key = params.get('api_key') or os.environ.get(f'{provider.upper()}_API_KEY')
+        library_domain, err = validate_domain(params.get('library_domain', 'opl.bibliocommons.com'))
+        if err:
+            self.send_json_response(400, {"error": err})
+            return
 
-            if not book_title:
-                self.send_json_response(400, {"error": "Book title is required"})
-                return
+        preferred_formats, err = validate_formats(params.get('formats', ['Book', 'eBook', 'Downloadable Audiobook']))
+        if err:
+            self.send_json_response(400, {"error": err})
+            return
 
-            try:
-                recommendations = self.get_ai_recommendations(book_title, api_key, provider)  # 1) ask ai for 5 recs
+        provider, err = validate_provider(params.get('api_provider', 'gemini'))
+        if err:
+            self.send_json_response(400, {"error": err})
+            return
 
-                for rec in recommendations:  # 2) enrich each rec w/ cover + catalog matches
-                    cover_url = self.get_open_library_cover(rec['title'], rec['author'])  # open library cover lookup (best-effort)
-                    rec['cover_url'] = cover_url
+        api_key = clean_str(params.get('api_key'), 500) or os.environ.get(f'{provider.upper()}_API_KEY')
 
-                    catalog_items = self.search_library_catalog(  # scrape biblio commons search results for availability
-                        title=rec['title'],
-                        author=rec['author'],
-                        domain=library_domain,
-                        preferred_formats=preferred_formats
-                    )
-                    rec['catalog_items'] = catalog_items
+        try:
+            recommendations = self.get_ai_recommendations(book_title, api_key, provider)  # 1) ask ai for 5 recs
 
-                self.send_json_response(200, {"recommendations": recommendations})
+            for rec in recommendations:  # 2) enrich each rec w/ cover + catalog matches
+                rec['cover_url'] = self.get_open_library_cover(rec.get('title', ''), rec.get('author', ''))  # open library cover lookup (best-effort)
 
-            except Exception as e:
-                import traceback
-                traceback.print_exc()
-                self.send_json_response(500, {"error": f"Error processing recommendations: {str(e)}"})
+                rec['catalog_items'] = self.search_library_catalog(  # scrape biblio commons search results for availability
+                    title=rec.get('title', ''),
+                    author=rec.get('author', ''),
+                    domain=library_domain,
+                    preferred_formats=preferred_formats
+                )
 
-        else:
-            self.send_error(404, "Endpoint Not Found")  # unknown route
+            self.send_json_response(200, {"recommendations": recommendations})
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            self.send_json_response(500, {"error": f"Error processing recommendations: {str(e)}"})
 
     def send_json_response(self, status, data):
         # small helper so we don't repeat headers everywhere
@@ -272,7 +350,10 @@ class LibraryAssistantHandler(http.server.BaseHTTPRequestHandler):
         )
 
         try:
-            return self._query_ai(prompt, api_key, provider)
+            result = self._query_ai(prompt, api_key, provider)
+            if not isinstance(result, dict):  # ai didn't give us the shape we asked for
+                raise ValueError("Clarification response wasn't a JSON object")
+            return result
         except Exception as e:
             print("All clarification providers failed:", e)
             return {"needs_clarification": False, "resolved_title": book_input, "resolved_author": ""}  # safest fallback: don't block user, just proceed
@@ -292,21 +373,41 @@ class LibraryAssistantHandler(http.server.BaseHTTPRequestHandler):
 
         try:
             data = self._query_ai(prompt, api_key, provider)
-            return data.get('recommendations', [])
+            raw_recs = data.get('recommendations', []) if isinstance(data, dict) else []
+
+            recs = []  # keep only well-formed items — ai output isn't guaranteed to match our schema
+            for r in raw_recs:
+                if not isinstance(r, dict):
+                    continue
+                title = str(r.get('title', '')).strip()
+                author = str(r.get('author', '')).strip()
+                if not title or not author:
+                    continue
+                recs.append({
+                    "title": title[:300],
+                    "author": author[:200],
+                    "reason": str(r.get('reason', '')).strip()[:500]
+                })
+
+            return recs if recs else self._recommendation_fallback()
         except Exception as e:
             print("All recommendation providers failed:", e)
-            return [  # fallback so ui doesn't look broken
-                {
-                    "title": "The Martian",
-                    "author": "Weir, Andy",
-                    "reason": "Fallback: A gripping hard science fiction survival story featuring engineering problem-solving."
-                },
-                {
-                    "title": "Project Hail Mary",
-                    "author": "Weir, Andy",
-                    "reason": "Fallback: A science-heavy, high-stakes journey across space to save humanity."
-                }
-            ]
+            return self._recommendation_fallback()
+
+    @staticmethod
+    def _recommendation_fallback():
+        return [  # fallback so ui doesn't look broken
+            {
+                "title": "The Martian",
+                "author": "Weir, Andy",
+                "reason": "Fallback: A gripping hard science fiction survival story featuring engineering problem-solving."
+            },
+            {
+                "title": "Project Hail Mary",
+                "author": "Weir, Andy",
+                "reason": "Fallback: A science-heavy, high-stakes journey across space to save humanity."
+            }
+        ]
 
     def get_open_library_cover(self, title, author):
         # open library search -> grab cover id or isbn -> build cover url
