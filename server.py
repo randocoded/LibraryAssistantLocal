@@ -62,6 +62,51 @@ def validate_domain(domain):
     return domain, None
 
 
+VOWELS = set("aeiou")
+
+
+def _looks_like_gibberish(token):
+    # short tokens are fine - acronyms, "Y2K", "AI", "Click'd" etc
+    letters = re.sub(r"[^a-zA-Z]", "", token)
+    if len(letters) < 6:
+        return False
+
+    lower = letters.lower()
+    vowel_ratio = sum(1 for c in lower if c in VOWELS) / len(lower)
+    if vowel_ratio < 0.15:  # real words rarely go below ~15% vowels
+        return True
+
+    max_consonant_run = current_run = 0  # longest run of consecutive consonants - real words rarely exceed 4-5
+    for c in lower:
+        if c not in VOWELS:
+            current_run += 1
+            max_consonant_run = max(max_consonant_run, current_run)
+        else:
+            current_run = 0
+    if max_consonant_run >= 5:
+        return True
+
+    digit_count = sum(1 for c in token if c.isdigit())  # digit-letter jumbles like "67676766autismseoihwuifg"
+    if digit_count > 0 and len(token) > 12 and digit_count / len(token) > 0.25:
+        return True
+
+    return False
+
+
+def validate_query_text(text):
+    # rejects keyboard-mashed gibberish while letting real titles/questions through
+    tokens = text.split()
+    if not tokens:
+        return text, None
+
+    flagged = sum(1 for t in tokens if _looks_like_gibberish(t))
+    is_gibberish = flagged > 0 if len(tokens) == 1 else flagged / len(tokens) > 0.5
+
+    if is_gibberish:
+        return None, "That doesn't look like a valid book title or question — try again?"
+    return text, None
+
+
 def validate_formats(formats):
     if not isinstance(formats, list) or len(formats) == 0:
         return None, "formats must be a non-empty list"
@@ -161,6 +206,11 @@ class LibraryAssistantHandler(http.server.BaseHTTPRequestHandler):
             self.send_json_response(400, {"error": "book_input is required"})
             return
 
+        book_input, err = validate_query_text(book_input)
+        if err:
+            self.send_json_response(400, {"error": err})
+            return
+
         provider, err = validate_provider(params.get('api_provider', 'gemini'))
         if err:
             self.send_json_response(400, {"error": err})
@@ -181,6 +231,11 @@ class LibraryAssistantHandler(http.server.BaseHTTPRequestHandler):
         book_title = clean_str(params.get('book_title'), 300)
         if not book_title:
             self.send_json_response(400, {"error": "Book title is required"})
+            return
+
+        book_title, err = validate_query_text(book_title)
+        if err:
+            self.send_json_response(400, {"error": err})
             return
 
         library_domain, err = validate_domain(params.get('library_domain', 'opl.bibliocommons.com'))
