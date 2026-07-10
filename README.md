@@ -14,10 +14,15 @@ ai-powered book recommendations, checked against your local library's catalog.
 
 needs an api key for gemini, openai, or anthropic — pick one in the app and paste your key in. (no local/offline fallback, so a key is required.)
 
-open your ide (vs code, vs codium, zed, etc.) and open the folder that you kept the downloaded files in. then, open the terminal at the bottom, and then navigate to 
+open your ide (vs code, vs codium, zed, etc.) and open the folder that you kept the downloaded files in. then, open the terminal at the bottom, and then
 ```bash
-cd your/folder/with/libraryassistantlocal
+cd put/folder/with/LibraryAssistantLocal
 ```
+eg
+```bash
+cd home/devv/Documents/Code/LibraryAssistantLocal
+```
+
 then run
 
 ```bash
@@ -26,7 +31,8 @@ python3 server.py
 ```
 
 open `http://localhost:8000` in your browser afterwards
-*you* have the app now!
+
+**you** have the app now!
 
 ## files
 
