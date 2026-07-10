@@ -14,12 +14,19 @@ ai-powered book recommendations, checked against your local library's catalog.
 
 needs an api key for gemini, openai, or anthropic — pick one in the app and paste your key in. (no local/offline fallback, so a key is required.)
 
+open your ide (vs code, vs codium, zed, etc.) and open the folder that you kept the downloaded files in. then, open the terminal at the bottom, and then navigate to 
+```bash
+cd your/folder/with/libraryassistantlocal
+```
+then run
+
 ```bash
 pip install -r requirements.txt
 python3 server.py
 ```
 
-then open `http://localhost:8000` in your browser.
+open `http://localhost:8000` in your browser afterwards
+*you* have the app now!
 
 ## files
 
