@@ -12,25 +12,10 @@ ai-powered book recommendations, checked against your local library's catalog.
 
 ## running it
 
-needs an api key for gemini, openai, or anthropic — pick one in the app and paste your key in. (no local/offline fallback, so a key is required.)
+needs an api key (a little ai key that allows you to ask it from your own programs) from gemini, openai, or anthropic — pick one in the app and paste your key in. (key is required.)
 
-open your ide (vs code, vs codium, zed, etc.) and open the folder that you kept the downloaded files in. then, open the terminal at the bottom, and then
-```bash
-cd put/folder/with/LibraryAssistantLocal
-```
-eg
-```bash
-cd home/devv/Documents/Code/LibraryAssistantLocal
-```
-
-then run
-
-```bash
-pip install -r requirements.txt
-python3 server.py
-```
-
-open `http://localhost:8000` in your browser afterwards
+this is the guide 4 all this
+https://opendoorcommunity.substack.com/p/how-to-run-library-assistant-local
 
 **you** have the app now!
 
